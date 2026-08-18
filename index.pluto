@@ -1,8 +1,8 @@
 -- Before running this script, ensure datafiles & materials in extras have been extracted, and verify the following checkout directories:
-$define PE_BASE = "../warframe-public-export" -- https://github.com/calamity-inc/warframe-public-export
-$define OUTPUT_BASE = "../warframe-public-export-plus/"
-$define LANGUAGES_BASE = "../warframe-languages-bin-data/" -- https://github.com/calamity-inc/warframe-languages-bin-data
-$define PACKAGES_BIN_BASE = [[F:\warframe-packages-bin-data]] -- https://github.com/Sainan/warframe-packages-bin-data
+$define PE_BASE = [[C:\Users\Administrator\warframe-public-export]] -- https://github.com/calamity-inc/warframe-public-export "../warframe-public-export"
+$define OUTPUT_BASE = [[G:\warframe-public-export-plus\]] -- "../warframe-public-export-plus/"
+$define LANGUAGES_BASE = "../warframe-languages-bin-data/" -- https://github.com/calamity-inc/warframe-languages-bin-data "../warframe-languages-bin-data/" 
+$define PACKAGES_BIN_BASE = [[G:\Warframemetadata]] -- https://github.com/Sainan/warframe-packages-bin-data
 
 $define MSGPACK = false
 
@@ -199,6 +199,9 @@ local function import_from_languages_bin(tag)
 	if not dicts.en[tag] then
 		tag_order:insert(tag)
 		local english = languages_bin_dicts.en[tag]
+		if not english then
+            print("ERROR: Missing tag in en.json: " .. tag)
+		end
 		assert(english, tag)
 		dicts.en[tag] = english
 		for EXTRA_LANGS as lang do
@@ -404,6 +407,7 @@ local function export_email(path, raw)
 	if languages_bin_dicts.en[raw.sndr] then
 		import_from_languages_bin(raw.sndr)
 	end
+	-- print("export_email: " .. path)
 	import_from_languages_bin(raw.sub)
 	if languages_bin_dicts.en[raw.msg] then
 		import_from_languages_bin(raw.msg)
@@ -429,6 +433,8 @@ for LANGS as lang do
 	local ExportCustoms = io.contents(PE_BASE .. "/ExportCustoms_" .. lang .. ".json") |> json.decode|json.withorder|
 	for ExportCustoms.ExportCustoms as item do
 		if item.name ~= nil then
+		-- if item.name ~= nil or tag == "" then
+			-- print("WARNING: Missing LocalizeTag for " .. item.uniqueName)
 			local tag = obj_find_property(item.uniqueName, "LocalizeTag")
 			if tag[1] == "/" then
 				store_tag(lang, item, "name", tag)
@@ -839,7 +845,7 @@ for LANGS as lang do
 					item.chainStages = {}
 					for ChainStages as stage do
 						local stageKeyUniqueName
-						if stage.Key ~= "" then
+						if not(stage.Key == "" or stage.Key == "\"\"") then
 							stageKeyUniqueName = obj_resolve_path(item.uniqueName, stage.Key)
 							local obj = add_key(stageKeyUniqueName)
 							if obj.data.QuestRewards?.LOW then
@@ -866,7 +872,7 @@ for LANGS as lang do
 							key = stageKeyUniqueName,
 							itemsToGiveWhenTriggered = stage.ItemsToGiveWhenTriggered
 						}
-						if stage.MessageToSendWhenTriggered.sub ~= "" then
+						if not(stage.MessageToSendWhenTriggered.sub == "" or stage.MessageToSendWhenTriggered.sub == "\"\"") then
 							stage_parsed.__order:insert("messageToSendWhenTriggered")
 							stage_parsed.messageToSendWhenTriggered = export_email(item.uniqueName, stage.MessageToSendWhenTriggered)
 						end
@@ -2336,7 +2342,7 @@ for LANGS as lang do
 				store_tag(lang, reward, "description", obj_find_property(reward.uniqueName, "LocalizeDescTag"))
 			else
 				reward.description = obj_find_property(reward.uniqueName, "LocalizeDescTag")
-				if reward.description == "" then
+				if reward.description == "" or reward.description == "\"\"" then
 					reward.description = nil
 				else
 					import_from_languages_bin(reward.description)
@@ -3003,7 +3009,7 @@ do
 		if io.isfile(file) then
 			local path = file:sub(#PACKAGES_BIN_BASE + 1, -6):replace("\\", "/")
 			local ItemReward = obj_find_property_2(path, "HuntingInfo", "ItemReward")
-			if ItemReward and ItemReward ~= "" then
+			if ItemReward and not(ItemReward == "" or ItemReward == "\"\"") then
 				local WoundedAnimalReward = obj_find_property_2(path, "HuntingInfo", "WoundedAnimalReward")
 				if WoundedAnimalReward == "" then
 					WoundedAnimalReward = nil
@@ -3298,11 +3304,16 @@ do
 			for entry.challenges as challenge do
 				if not ExportChallenges[challenge] then
 					local name = obj_from_path(challenge).parent
+					--print(string.format("Processing challenge: %s, parent: %s", challenge, name))
 					if name == "VaniaChallengeBase" or name[1] == "/" then
 						name = challenge:split("/"):back()
 					else
 						name = name:replace("Base", "Challenge")
 					end
+					if name:find("Easy$") or name:find("VeryHard$") or name:find("Hard$") or name:find("Normal$") then
+        				name = name:replace("Easy", "Challenge"):replace("VeryHard", "Challenge"):replace("Hard", "Challenge"):replace("Normal", "Challenge")
+					end
+					--print(string.format("Processing challenge: %s, parent: %s", challenge, name))
 					--print(challenge, name)
 					ExportChallenges[challenge] = {
 						__order = { "name", "description", "flavour", "icon", "requiredCount" },
@@ -3366,21 +3377,27 @@ do
 	for obj_from_path("/Lotus/Types/Challenges/PrimaryChallengeManifest").data.ChallengeRewardManifest as challengeReward do
 		local path = obj_resolve_path("/Lotus/Types/Challenges/PrimaryChallengeManifest", challengeReward.Challenge)
 		paths:insert(path)
-		if challengeReward.SilentReward == 1 then
-			challenge_to_countedRewards[path] = challengeReward.MsgBoxEntry.att:mapped(|x| -> {
-				__order = { "StoreItem", "ItemCount" },
-				StoreItem = to_storeitem(x),
-				ItemCount = 1,
-			})
-		elseif #challengeReward.ConditionalRewards ~= 0 and #challengeReward.ConditionalRewards[1].CountedRewards ~= 0 then
-			challenge_to_countedRewards[path] = challengeReward.ConditionalRewards[1].CountedRewards
-		else
-			challenge_to_email[path] = export_email("/Lotus/Types/Challenges/PrimaryChallengeManifest", challengeReward.MsgBoxEntry)
-			-- In theory, it should only give what is owned, but based on the limited information I can find, DE may have simply taken the easy way: https://www.reddit.com/r/Warframe/comments/rzlnku/receiving_all_protovyre_armor_evolution_but_only/
-			for challengeReward.ConditionalRewards as cr do
-				for cr.Rewards as reward do
-					challenge_to_email[path].attachments:insert(reward)
+		if challengeReward.SilentReward then
+			if challengeReward.SilentReward == 1 then
+				challenge_to_countedRewards[path] = challengeReward.MsgBoxEntry.att:mapped(|x| -> {
+					__order = { "StoreItem", "ItemCount" },
+					StoreItem = to_storeitem(x),
+					ItemCount = 1,
+				})
+			elseif #challengeReward.ConditionalRewards ~= 0 and #challengeReward.ConditionalRewards[1].CountedRewards ~= 0 then
+				challenge_to_countedRewards[path] = challengeReward.ConditionalRewards[1].CountedRewards
+			else
+				challenge_to_email[path] = export_email("/Lotus/Types/Challenges/PrimaryChallengeManifest", challengeReward.MsgBoxEntry)
+				-- In theory, it should only give what is owned, but based on the limited information I can find, DE may have simply taken the easy way: https://www.reddit.com/r/Warframe/comments/rzlnku/receiving_all_protovyre_armor_evolution_but_only/
+				for challengeReward.ConditionalRewards as cr do
+					for cr.Rewards as reward do
+						challenge_to_email[path].attachments:insert(reward)
+					end
 				end
+			end
+		else
+			if #challengeReward.ConditionalRewards ~= 0 and #challengeReward.ConditionalRewards[1].CountedRewards ~= 0 then
+				challenge_to_countedRewards[path] = challengeReward.ConditionalRewards[1].CountedRewards
 			end
 		end
 	end
@@ -4692,7 +4709,7 @@ do
 					ExportSyndicates[tag].titles = {}
 					for obj.data.Titles as title do
 						if title.icon == "" then title.icon = nil end
-						if title.consequenceLoc == "" then title.consequenceLoc = nil end
+						if title.consequenceLoc == "" or title.consequenceLoc == "\"\"" then title.consequenceLoc = nil end
 						if title.requiresSacrifice == 1 and (title.sacrifice.credits ~= 0 or #title.sacrifice.items ~= 0) then
 							assert(title.sacrifice.desc == "", path)
 							title.sacrifice.desc = nil
@@ -4759,7 +4776,7 @@ print "Creating ExportTextIcons..."
 do
 	local ExportTextIcons = { __order = {} }
 	for obj_from_path("/Lotus/Types/Interface/LotusPlatformIconCollection").data.Icons as icon do
-		if not icon.Name or icon.Name == "" then
+		if not icon.Name or icon.Name == "" or icon.Name == "\"\"" then
 			continue
 		end
 		ExportTextIcons.__order:insert(icon.Name)
@@ -4767,7 +4784,8 @@ do
 			__order = {}
 		}
 		for icon.Platforms as platformIcon do
-			if platformIcon.Material ~= "" then
+			if platformIcon.Material and platformIcon.Material ~= "" and platformIcon.Material ~= "\"\"" then
+				--print(platformIcon.Material)
 				if path := obj_from_path(platformIcon.Material).data?["TX:DiffuseMap"] then
 					ExportTextIcons[icon.Name].__order:insert(platformIcon.IconPlatform)
 					ExportTextIcons[icon.Name][platformIcon.IconPlatform] = obj_resolve_path(platformIcon.Material, path)
